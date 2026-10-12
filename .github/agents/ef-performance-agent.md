@@ -1,4 +1,5 @@
 ---
+---
 name: ef-performance-agent
 description: A custom agent focused on Entity Framework Core performance analysis, query optimization, and best practices for this repository.
 tools:
