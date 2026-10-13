@@ -1,4 +1,4 @@
-﻿# EF Query to Stored Procedure — Memory-Bounded Report Migration
+# EF Query to Stored Procedure — Memory-Bounded Report Migration
 
 ## Purpose
 

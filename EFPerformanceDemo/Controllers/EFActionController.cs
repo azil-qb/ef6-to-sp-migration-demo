@@ -1,8 +1,10 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics;
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace EFPerformanceDemo.Controllers
@@ -164,23 +166,36 @@ namespace EFPerformanceDemo.Controllers
             });
         }
 
-        [HttpPost("apply-discount-sp")]
-        public async Task<IActionResult> ApplyDiscountSP([FromQuery] int categoryId, [FromQuery] decimal discountPercent)
+        [HttpPost("apply-complex-discount-sp")]
+        public async Task<IActionResult> ApplyComplexDiscountSP([FromQuery] int categoryId, [FromQuery] decimal discountPercent)
         {
             var watch = Stopwatch.StartNew();
 
-            // Executes all updates, inserts, and transaction logic on the SQL Server side in a single request
-            int rowsAffected = await _context.Database.ExecuteSqlInterpolatedAsync(
-                $"EXEC dbo.sp_ApplyCategoryDiscount @CategoryId={categoryId}, @DiscountPercent={discountPercent}"
-            );
+            // Cheap, index-friendly count purely for reporting purposes.
+            var orderCount = await _context.Orders
+                .Where(o => o.CategoryId == categoryId && !o.IsProcessed)
+                .CountAsync();
+
+            if (orderCount == 0)
+                return Ok(new { Message = "No unprocessed orders found. Run /api/orders/reset first." });
+
+            // Single set-based round-trip. The stored procedure performs the
+            // discount, stock decrement, reward-point accrual, audit logging,
+            // and processed-flag update entirely in SQL Server, avoiding the
+            // N+1 per-order queries and per-row change tracking of the EF version.
+            await _context.Database.ExecuteSqlRawAsync(
+                "EXEC dbo.sp_ApplyComplexCategoryDiscount @CategoryId, @DiscountPercent",
+                new SqlParameter("@CategoryId", categoryId),
+                new SqlParameter("@DiscountPercent", discountPercent));
 
             watch.Stop();
 
             return Ok(new
             {
-                Method = "Optimized Stored Procedure",
-                TimeTakenMs = watch.ElapsedMilliseconds,
-                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+                Method = "Optimized Stored Procedure (set-based, 1 round-trip)",
+                OrdersProcessed = orderCount,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds,
+                TimeTakenMs = watch.ElapsedMilliseconds
             });
         }
     }

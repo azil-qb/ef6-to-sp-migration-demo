@@ -1,4 +1,5 @@
 using EFPerformanceDemo.DBContext;
+using EFPerformanceDemo.Utility;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,8 +11,17 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+
+var logFilePath = Path.Combine(Directory.GetCurrentDirectory(), "executable_queries.sql");
+
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+        .EnableSensitiveDataLogging() // Ensures parameters show actual values rather than '?'
+        .UseLoggerFactory(LoggerFactory.Create(b =>
+            b.AddProvider(new SqlFileLoggerProvider(logFilePath))
+             .AddFilter((category, level) =>
+                 category == DbLoggerCategory.Database.Command.Name && level == LogLevel.Information))));
+
 
 var app = builder.Build();
 
