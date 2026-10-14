@@ -21,6 +21,16 @@ The primary goal is not merely to replace LINQ with SQL. The implementation must
 
 This skill is based on the repository's established V2 bulk-report migration pattern.
 
+
+## Skill File Dependencies & Linking
+
+When executing this prompt, the assistant must load and follow these core skill and guideline files in the project repository:
+
+- **Main Skill Definition & Workflow ('skill/SKILL.md`):** Controls the mandatory human-in-the-loop workflow, Phase 0 discovery requirements, and human approval gates (Gate 1, Gate 2, Gate 3).
+- **Detailed V2 Implementation Patterns (`skill/references/v2-report-pattern.md`):** Detailed reference for Phase 2 through Phase 8, covering Dapper contract models, `StreamBatched` provider logic, `GetQuery()` generator streaming, feature-flag rollout, DI registration, and unit test patterns.
+
+*Note: Before proceeding to Phase 0, confirm that `SKILL.md` and `v2-report-pattern.md` exist in the root or working directory.*
+
 ## Non-negotiable rules
 
 1. **Do not start implementation until repository discovery is complete.**

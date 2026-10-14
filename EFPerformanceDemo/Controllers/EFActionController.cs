@@ -198,5 +198,186 @@ namespace EFPerformanceDemo.Controllers
                 TimeTakenMs = watch.ElapsedMilliseconds
             });
         }
+
+        [HttpGet("search-cartesian-explosion-ef")]
+        public async Task<IActionResult> SearchCartesianExplosionEF([FromQuery] string keyword)
+        {
+            var watch = Stopwatch.StartNew();
+
+            // 1. Cartesian Explosion: Joining multiple collection navigations creates exponential duplicate rows
+            // SQL Server sends 200,000+ rows over the network for 5,000 orders!
+            var orders = await _context.Orders
+                .Include(o => o.Customer)
+                .Include(o => o.OrderItems)
+                    .ThenInclude(i => i.Inventory)
+                .Where(o => o.OrderItems.Any(i => i.Inventory.ProductName.Contains(keyword)))
+                .ToListAsync(); // EF Core spends several seconds materializing & deduplicating entities in C# memory
+
+            // 2. Heavy C# In-Memory Aggregation across child collections
+            var result = new List<object>();
+            foreach (var order in orders)
+            {
+                // Force CPU-heavy memory processing per entity
+                decimal total = 0;
+                foreach (var item in order.OrderItems)
+                {
+                    total += item.UnitPrice * item.Quantity;
+                }
+
+                result.Add(new
+                {
+                    order.Id,
+                    CustomerName = order.Customer.FullName,
+                    CalculatedTotal = total,
+                    ItemNames = string.Join(", ", order.OrderItems.Select(i => i.Inventory.ProductName))
+                });
+            }
+
+            watch.Stop();
+
+            return Ok(new
+            {
+                Method = "Cartesian Explosion EF LINQ",
+                ResultCount = result.Count,
+                TimeTakenMs = watch.ElapsedMilliseconds,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+            });
+        }
+
+        [HttpGet("search-cartesian-explosion-sp")]
+        public async Task<IActionResult> SearchCartesianExplosionSP([FromQuery] string keyword)
+        {
+            var watch = Stopwatch.StartNew();
+
+            var result = new List<OrderSearchResult>();
+
+            var connection = _context.Database.GetDbConnection();
+            var wasClosed = connection.State != System.Data.ConnectionState.Open;
+
+            if (wasClosed)
+                await connection.OpenAsync();
+
+            try
+            {
+                // Single set-based round-trip: the stored procedure pre-filters to
+                // distinct matching OrderIds, then aggregates (SUM/STRING_AGG) in SQL.
+                // No cartesian duplication crosses the network, no EF change tracking,
+                // no per-order in-memory aggregation.
+                using var command = connection.CreateCommand();
+                command.CommandText = "dbo.sp_SearchOrdersByProductKeyword";
+                command.CommandType = System.Data.CommandType.StoredProcedure;
+
+                var keywordParam = command.CreateParameter();
+                keywordParam.ParameterName = "@Keyword";
+                keywordParam.Value = (object?)keyword ?? DBNull.Value;
+                command.Parameters.Add(keywordParam);
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    result.Add(new OrderSearchResult
+                    {
+                        Id = reader.GetInt32(reader.GetOrdinal("Id")),
+                        CustomerName = reader.GetString(reader.GetOrdinal("CustomerName")),
+                        CalculatedTotal = reader.GetDecimal(reader.GetOrdinal("CalculatedTotal")),
+                        ItemNames = reader.IsDBNull(reader.GetOrdinal("ItemNames"))
+                            ? string.Empty
+                            : reader.GetString(reader.GetOrdinal("ItemNames"))
+                    });
+                }
+            }
+            finally
+            {
+                if (wasClosed)
+                    await connection.CloseAsync();
+            }
+
+            watch.Stop();
+
+            return Ok(new
+            {
+                Method = "Optimized Stored Procedure (set-based aggregation, 1 round-trip)",
+                ResultCount = result.Count,
+                TimeTakenMs = watch.ElapsedMilliseconds,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+            });
+        }
+    
+
+        [HttpPost("seed-heavy-data")]
+        public async Task<IActionResult> SeedHeavyData([FromQuery] int count = 25000)
+        {
+            var watch = Stopwatch.StartNew();
+            var random = new Random();
+
+            // Fetch existing customer and inventory IDs to link against
+            var customerIds = await _context.Customers.Select(c => c.Id).ToListAsync();
+            var inventoryIds = await _context.Inventories.Select(i => i.Id).ToListAsync();
+
+            if (!customerIds.Any() || !inventoryIds.Any())
+            {
+                return BadRequest("Please run /api/orders/seed first to create base Customers and Inventories.");
+            }
+
+            int batchSize = 2500; // Save in chunks of 2,500 to prevent memory spikes during seed
+            int totalAdded = 0;
+
+            for (int b = 0; b < count; b += batchSize)
+            {
+                var orders = new List<Order>();
+                var logs = new List<OrderAuditLog>();
+
+                for (int i = 0; i < batchSize; i++)
+                {
+                    var order = new Order
+                    {
+                        CustomerId = customerIds[random.Next(customerIds.Count)],
+                        CategoryId = random.Next(1, 5),
+                        IsProcessed = false,
+                        CreatedAt = DateTime.UtcNow.AddDays(-random.Next(1, 365)),
+                        OrderItems = Enumerable.Range(1, 4).Select(_ => new OrderItem
+                        {
+                            InventoryId = 34,//inventoryIds[random.Next(inventoryIds.Count)],
+                            Quantity = random.Next(1, 10),
+                            UnitPrice = (decimal)(random.Next(15, 300) + 0.99)
+                        }).ToList()
+                    };
+
+                    orders.Add(order);
+                }
+
+                await _context.Orders.AddRangeAsync(orders);
+                await _context.SaveChangesAsync(); // Flushes batch to DB
+
+                // Generate Audit Logs for newly created orders
+                foreach (var o in orders)
+                {
+                    logs.Add(new OrderAuditLog
+                    {
+                        OrderId = o.Id,
+                        LogMessage = $"Bulk seeded order for Category {o.CategoryId}.",
+                        ProcessedAt = DateTime.UtcNow
+                    });
+                }
+
+                await _context.OrderAuditLogs.AddRangeAsync(logs);
+                await _context.SaveChangesAsync();
+
+                totalAdded += batchSize;
+            }
+
+            watch.Stop();
+
+            int totalOrdersCount = await _context.Orders.CountAsync();
+            int totalItemsCount = await _context.OrderItems.CountAsync();
+
+            return Ok(new
+            {
+                Message = $"Successfully inserted {totalAdded} new orders!",
+                TotalOrdersInDB = totalOrdersCount,
+                TotalOrderItemsInDB = totalItemsCount,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+            });
+        }
     }
 }
