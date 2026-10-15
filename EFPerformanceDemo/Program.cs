@@ -1,7 +1,7 @@
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Repositories;
 using EFPerformanceDemo.Utility;
-using Microsoft.EntityFrameworkCore;
+using System.Data.Entity.Infrastructure.Interception;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,14 +15,11 @@ builder.Services.AddSwaggerGen();
 
 var logFilePath = Path.Combine(Directory.GetCurrentDirectory(), "executable_queries.sql");
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
-        .EnableSensitiveDataLogging() // Ensures parameters show actual values rather than '?'
-        .UseLoggerFactory(LoggerFactory.Create(b =>
-            b.AddProvider(new SqlFileLoggerProvider(logFilePath))
-             .AddFilter((category, level) =>
-                 category == DbLoggerCategory.Database.Command.Name && level == LogLevel.Information))));
+DbInterception.Add(new SqlFileLogger(logFilePath));
 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+builder.Services.AddScoped(_ => new AppDbContext(connectionString));
 builder.Services.AddScoped<IOrderSearchRepository, OrderSearchRepository>();
 
 var app = builder.Build();

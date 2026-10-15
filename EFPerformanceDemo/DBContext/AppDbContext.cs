@@ -1,18 +1,17 @@
 ﻿using System.Collections.Generic;
-using System.Reflection.Emit;
+using System.Data.Entity;
 using EFPerformanceDemo.Models;
-using Microsoft.EntityFrameworkCore;
 
 namespace EFPerformanceDemo.DBContext
 {
     public class AppDbContext : DbContext
     {
-        public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+        public AppDbContext(string connectionString) : base(connectionString) { }
 
-        public DbSet<Customer> Customers => Set<Customer>();
-        public DbSet<Inventory> Inventories => Set<Inventory>();
-        public DbSet<Order> Orders => Set<Order>();
-        public DbSet<OrderItem> OrderItems => Set<OrderItem>();
-        public DbSet<OrderAuditLog> OrderAuditLogs => Set<OrderAuditLog>();
+        public DbSet<Customer> Customers { get; set; } = null!;
+        public DbSet<Inventory> Inventories { get; set; } = null!;
+        public DbSet<Order> Orders { get; set; } = null!;
+        public DbSet<OrderItem> OrderItems { get; set; } = null!;
+        public DbSet<OrderAuditLog> OrderAuditLogs { get; set; } = null!;
     }
 }

@@ -1,12 +1,11 @@
 ﻿using System.Diagnostics;
-using System.Diagnostics;
+using System.Data.Entity;
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Models;
 using EFPerformanceDemo.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
+using System.Data.SqlClient;
 
 namespace EFPerformanceDemo.Controllers
 {
@@ -36,7 +35,7 @@ namespace EFPerformanceDemo.Controllers
                 FullName = $"Customer {c}",
                 RewardPoints = 0
             }).ToList();
-            await _context.Customers.AddRangeAsync(customers);
+            _context.Customers.AddRange(customers);
 
             // Seed 50 Inventories
             var inventories = Enumerable.Range(1, 50).Select(i => new Inventory
@@ -44,7 +43,7 @@ namespace EFPerformanceDemo.Controllers
                 ProductName = $"Product {i}",
                 StockQuantity = 10000
             }).ToList();
-            await _context.Inventories.AddRangeAsync(inventories);
+            _context.Inventories.AddRange(inventories);
 
             await _context.SaveChangesAsync();
 
@@ -67,7 +66,7 @@ namespace EFPerformanceDemo.Controllers
                 orders.Add(order);
             }
 
-            await _context.Orders.AddRangeAsync(orders);
+            _context.Orders.AddRange(orders);
             await _context.SaveChangesAsync();
 
             return Ok("Seeded Customers, Inventories, 5,000 Orders, and 20,000 OrderItems!");
@@ -132,8 +131,7 @@ namespace EFPerformanceDemo.Controllers
             {
                 var order = await _context.Orders
                     .Include(o => o.Customer)
-                    .Include(o => o.OrderItems)
-                        .ThenInclude(i => i.Inventory)
+                    .Include(o => o.OrderItems.Select(i => i.Inventory))
                     .FirstAsync(o => o.Id == id);
 
                 decimal orderTotal = 0;
@@ -186,7 +184,7 @@ namespace EFPerformanceDemo.Controllers
             // discount, stock decrement, reward-point accrual, audit logging,
             // and processed-flag update entirely in SQL Server, avoiding the
             // N+1 per-order queries and per-row change tracking of the EF version.
-            await _context.Database.ExecuteSqlRawAsync(
+            await _context.Database.ExecuteSqlCommandAsync(
                 "EXEC dbo.sp_ApplyComplexCategoryDiscount @CategoryId, @DiscountPercent",
                 new SqlParameter("@CategoryId", categoryId),
                 new SqlParameter("@DiscountPercent", discountPercent));
@@ -211,8 +209,7 @@ namespace EFPerformanceDemo.Controllers
             // SQL Server sends 200,000+ rows over the network for 5,000 orders!
             var orders = await _context.Orders
                 .Include(o => o.Customer)
-                .Include(o => o.OrderItems)
-                    .ThenInclude(i => i.Inventory)
+                .Include(o => o.OrderItems.Select(i => i.Inventory))
                 .Where(o => o.OrderItems.Any(i => i.Inventory.ProductName.Contains(keyword)))
                 .ToListAsync(); // EF Core spends several seconds materializing & deduplicating entities in C# memory
 
@@ -312,7 +309,7 @@ namespace EFPerformanceDemo.Controllers
                     orders.Add(order);
                 }
 
-                await _context.Orders.AddRangeAsync(orders);
+                _context.Orders.AddRange(orders);
                 await _context.SaveChangesAsync(); // Flushes batch to DB
 
                 // Generate Audit Logs for newly created orders
@@ -326,7 +323,7 @@ namespace EFPerformanceDemo.Controllers
                     });
                 }
 
-                await _context.OrderAuditLogs.AddRangeAsync(logs);
+                _context.OrderAuditLogs.AddRange(logs);
                 await _context.SaveChangesAsync();
 
                 totalAdded += batchSize;

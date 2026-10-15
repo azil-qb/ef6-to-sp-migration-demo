@@ -1,88 +1,72 @@
-﻿using System.Text;
-using System.Text.RegularExpressions;
-using EFPerformanceDemo.Utility;
+﻿using System.Data.Common;
+using System.Data.Entity.Infrastructure.Interception;
+using System.Text;
 
 namespace EFPerformanceDemo.Utility
 {
-    public class SqlFileLogger : ILogger
+    /// <summary>
+    /// EF6 command interceptor that logs executed SQL (with parameter DECLAREs)
+    /// to a file, replaying the behavior of the original EF Core ILogger-based
+    /// SqlFileLogger but using EF6's IDbCommandInterceptor pipeline instead.
+    /// </summary>
+    public class SqlFileLogger : IDbCommandInterceptor
     {
         private readonly string _filePath;
         private static readonly object _lock = new();
 
         public SqlFileLogger(string filePath) => _filePath = filePath;
 
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public void ReaderExecuting(DbCommand command, DbCommandInterceptionContext<DbDataReader> interceptionContext)
+            => LogCommand(command);
 
-        public bool IsEnabled(LogLevel logLevel) => true;
+        public void ReaderExecuted(DbCommand command, DbCommandInterceptionContext<DbDataReader> interceptionContext) { }
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        public void NonQueryExecuting(DbCommand command, DbCommandInterceptionContext<int> interceptionContext)
+            => LogCommand(command);
+
+        public void NonQueryExecuted(DbCommand command, DbCommandInterceptionContext<int> interceptionContext) { }
+
+        public void ScalarExecuting(DbCommand command, DbCommandInterceptionContext<object> interceptionContext)
+            => LogCommand(command);
+
+        public void ScalarExecuted(DbCommand command, DbCommandInterceptionContext<object> interceptionContext) { }
+
+        private void LogCommand(DbCommand command)
         {
-            // Event ID 20101 = CommandExecuted
-            if (eventId.Id == 20101 && state is IReadOnlyList<KeyValuePair<string, object>> payload)
+            if (string.IsNullOrEmpty(command.CommandText))
+                return;
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"-- Executed at {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+
+            foreach (DbParameter parameter in command.Parameters)
             {
-                string commandText = string.Empty;
-                var parameters = new List<string>();
-
-                foreach (var kvp in payload)
+                var declaredType = parameter.Value switch
                 {
-                    if (kvp.Key == "commandText")
-                    {
-                        commandText = kvp.Value?.ToString() ?? string.Empty;
-                    }
-                    else if (kvp.Key == "parameters" && kvp.Value is string paramsString && !string.IsNullOrWhiteSpace(paramsString))
-                    {
-                        // Extracts parameter string like "@__categoryId_0='1' (Nullable = false)"
-                        var paramMatches = Regex.Matches(paramsString, @"(@\w+)=('([^']*)'|[^,\s]+)");
-                        foreach (Match match in paramMatches)
-                        {
-                            var paramName = match.Groups[1].Value;
-                            var paramValue = match.Groups[2].Value;
+                    string => "NVARCHAR(MAX)",
+                    bool => "BIT",
+                    _ => "INT"
+                };
 
-                            // Determines target SQL type (numeric vs string/bit)
-                            if (paramValue.StartsWith("'") && paramValue.EndsWith("'"))
-                            {
-                                parameters.Add($"DECLARE {paramName} NVARCHAR(MAX) = {paramValue};");
-                            }
-                            else if (bool.TryParse(paramValue, out bool boolVal))
-                            {
-                                parameters.Add($"DECLARE {paramName} BIT = {(boolVal ? 1 : 0)};");
-                            }
-                            else
-                            {
-                                parameters.Add($"DECLARE {paramName} INT = {paramValue};");
-                            }
-                        }
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(commandText))
+                var declaredValue = parameter.Value switch
                 {
-                    var sb = new StringBuilder();
-                    sb.AppendLine($"-- Executed at {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                    string s => $"'{s}'",
+                    bool b => b ? "1" : "0",
+                    null or DBNull => "NULL",
+                    _ => parameter.Value.ToString()
+                };
 
-                    foreach (var param in parameters)
-                    {
-                        sb.AppendLine(param);
-                    }
+                sb.AppendLine($"DECLARE {parameter.ParameterName} {declaredType} = {declaredValue};");
+            }
 
-                    sb.AppendLine(commandText);
-                    sb.AppendLine("GO");
-                    sb.AppendLine();
+            sb.AppendLine(command.CommandText);
+            sb.AppendLine("GO");
+            sb.AppendLine();
 
-                    lock (_lock)
-                    {
-                        File.AppendAllText(_filePath, sb.ToString());
-                    }
-                }
+            lock (_lock)
+            {
+                File.AppendAllText(_filePath, sb.ToString());
             }
         }
-    }
-
-    public class SqlFileLoggerProvider : ILoggerProvider
-    {
-        private readonly string _filePath;
-        public SqlFileLoggerProvider(string filePath) => _filePath = filePath;
-        public ILogger CreateLogger(string categoryName) => new SqlFileLogger(_filePath);
-        public void Dispose() { }
     }
 }

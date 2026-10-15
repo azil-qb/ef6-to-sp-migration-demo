@@ -1,8 +1,8 @@
 using System.Data;
+using System.Data.Entity;
 using Dapper;
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Models;
-using Microsoft.EntityFrameworkCore;
 
 namespace EFPerformanceDemo.Repositories
 {
@@ -25,7 +25,7 @@ namespace EFPerformanceDemo.Repositories
         {
             var result = new List<OrderSearchResult>();
 
-            var connection = _context.Database.GetDbConnection();
+            var connection = _context.Database.Connection;
             var wasClosed = connection.State != ConnectionState.Open;
 
             if (wasClosed)
@@ -112,7 +112,7 @@ namespace EFPerformanceDemo.Repositories
             // Orders -> Customers/OrderItems and computes ItemCount/TotalAmount
             // in SQL (COUNT/SUM with LEFT JOIN to preserve zero-item orders),
             // replacing the 1 + 2*N round-trip N+1 pattern entirely.
-            var connection = _context.Database.GetDbConnection();
+            var connection = _context.Database.Connection;
             var wasClosed = connection.State != ConnectionState.Open;
 
             if (wasClosed)
