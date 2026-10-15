@@ -1,4 +1,5 @@
 using EFPerformanceDemo.DBContext;
+using EFPerformanceDemo.Repositories;
 using EFPerformanceDemo.Utility;
 using Microsoft.EntityFrameworkCore;
 
@@ -22,6 +23,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
              .AddFilter((category, level) =>
                  category == DbLoggerCategory.Database.Command.Name && level == LogLevel.Information))));
 
+builder.Services.AddScoped<IOrderSearchRepository, OrderSearchRepository>();
 
 var app = builder.Build();
 

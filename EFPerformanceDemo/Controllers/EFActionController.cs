@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Models;
+using EFPerformanceDemo.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -14,9 +15,11 @@ namespace EFPerformanceDemo.Controllers
     public class EFActionController : ControllerBase
     {
         private readonly AppDbContext _context;
-        public EFActionController(AppDbContext context) 
+        private readonly IOrderSearchRepository _orderSearchRepository;
+        public EFActionController(AppDbContext context, IOrderSearchRepository orderSearchRepository) 
         {
             _context = context;
+            _orderSearchRepository = orderSearchRepository;
         }
 
         [HttpPost("seed")]
@@ -249,48 +252,11 @@ namespace EFPerformanceDemo.Controllers
         {
             var watch = Stopwatch.StartNew();
 
-            var result = new List<OrderSearchResult>();
-
-            var connection = _context.Database.GetDbConnection();
-            var wasClosed = connection.State != System.Data.ConnectionState.Open;
-
-            if (wasClosed)
-                await connection.OpenAsync();
-
-            try
-            {
-                // Single set-based round-trip: the stored procedure pre-filters to
-                // distinct matching OrderIds, then aggregates (SUM/STRING_AGG) in SQL.
-                // No cartesian duplication crosses the network, no EF change tracking,
-                // no per-order in-memory aggregation.
-                using var command = connection.CreateCommand();
-                command.CommandText = "dbo.sp_SearchOrdersByProductKeyword";
-                command.CommandType = System.Data.CommandType.StoredProcedure;
-
-                var keywordParam = command.CreateParameter();
-                keywordParam.ParameterName = "@Keyword";
-                keywordParam.Value = (object?)keyword ?? DBNull.Value;
-                command.Parameters.Add(keywordParam);
-
-                using var reader = await command.ExecuteReaderAsync();
-                while (await reader.ReadAsync())
-                {
-                    result.Add(new OrderSearchResult
-                    {
-                        Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                        CustomerName = reader.GetString(reader.GetOrdinal("CustomerName")),
-                        CalculatedTotal = reader.GetDecimal(reader.GetOrdinal("CalculatedTotal")),
-                        ItemNames = reader.IsDBNull(reader.GetOrdinal("ItemNames"))
-                            ? string.Empty
-                            : reader.GetString(reader.GetOrdinal("ItemNames"))
-                    });
-                }
-            }
-            finally
-            {
-                if (wasClosed)
-                    await connection.CloseAsync();
-            }
+            // Data access delegated to the repository: the stored procedure pre-filters
+            // to distinct matching OrderIds, then aggregates (SUM/STRING_AGG) in SQL in
+            // a single set-based round-trip. No cartesian duplication crosses the network,
+            // no EF change tracking, no per-order in-memory aggregation.
+            var result = await _orderSearchRepository.SearchOrdersByKeywordAsync(keyword);
 
             watch.Stop();
 
@@ -379,5 +345,47 @@ namespace EFPerformanceDemo.Controllers
                 TimeTakenSeconds = watch.Elapsed.TotalSeconds
             });
         }
+
+        [HttpGet("get-orders-nplusone-read-ef")]
+        public async Task<IActionResult> GetOrdersNPlusOneReadEF([FromQuery] int categoryId)
+        {
+            var watch = Stopwatch.StartNew();
+
+            // Data access (including the N+1 query loop) delegated to the repository.
+            var (response, queryCount) = await _orderSearchRepository.GetOrdersNPlusOneAsync(categoryId);
+
+            watch.Stop();
+
+            return Ok(new
+            {
+                Method = "N+1 Read Queries Loop (2,000 Orders)",
+                TotalDatabaseQueriesExecuted = queryCount, // 1 + 2000 + 2000 = 4,001 SQL queries!
+                ResultCount = response.Count,
+                TimeTakenMs = watch.ElapsedMilliseconds,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+            });
+        }
+
+        [HttpGet("get-orders-nplusone-read-sp")]
+        public async Task<IActionResult> GetOrdersNPlusOneReadSP([FromQuery] int categoryId)
+        {
+            var watch = Stopwatch.StartNew();
+
+            // Single set-based round-trip via Dapper + sp_GetOrdersByCategory,
+            // replacing the N+1 pattern in GetOrdersNPlusOneReadEF.
+            var response = await _orderSearchRepository.GetOrdersByCategorySpAsync(categoryId);
+
+            watch.Stop();
+
+            return Ok(new
+            {
+                Method = "Optimized Stored Procedure via Dapper (1 round-trip)",
+                TotalDatabaseQueriesExecuted = 1,
+                ResultCount = response.Count,
+                TimeTakenMs = watch.ElapsedMilliseconds,
+                TimeTakenSeconds = watch.Elapsed.TotalSeconds
+            });
+        }
+
     }
 }
