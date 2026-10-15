@@ -106,32 +106,5 @@ namespace EFPerformanceDemo.Repositories
             return (response, queryCount);
         }
 
-        public async Task<List<OrderNPlusOneReadResult>> GetOrdersByCategorySpAsync(int categoryId)
-        {
-            // Single set-based round-trip via Dapper: the stored procedure joins
-            // Orders -> Customers/OrderItems and computes ItemCount/TotalAmount
-            // in SQL (COUNT/SUM with LEFT JOIN to preserve zero-item orders),
-            // replacing the 1 + 2*N round-trip N+1 pattern entirely.
-            var connection = _context.Database.Connection;
-            var wasClosed = connection.State != ConnectionState.Open;
-
-            if (wasClosed)
-                await connection.OpenAsync();
-
-            try
-            {
-                var rows = await connection.QueryAsync<OrderNPlusOneReadResult>(
-                    "dbo.sp_GetOrdersByCategory",
-                    new { CategoryId = categoryId },
-                    commandType: CommandType.StoredProcedure);
-
-                return rows.AsList();
-            }
-            finally
-            {
-                if (wasClosed)
-                    await connection.CloseAsync();
-            }
-        }
     }
 }

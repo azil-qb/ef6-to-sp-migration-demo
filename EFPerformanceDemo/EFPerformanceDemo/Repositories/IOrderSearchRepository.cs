@@ -20,13 +20,5 @@ namespace EFPerformanceDemo.Repositories
         /// the original GetOrdersNPlusOneReadEF behavior exactly.
         /// </summary>
         Task<(List<OrderNPlusOneReadResult> Rows, int QueryCount)> GetOrdersNPlusOneAsync(int categoryId);
-
-        /// <summary>
-        /// Executes dbo.sp_GetOrdersByCategory via Dapper: a single set-based
-        /// round-trip that joins and aggregates in SQL, replacing the N+1
-        /// pattern in <see cref="GetOrdersNPlusOneAsync"/> while preserving
-        /// identical output semantics.
-        /// </summary>
-        Task<List<OrderNPlusOneReadResult>> GetOrdersByCategorySpAsync(int categoryId);
     }
 }

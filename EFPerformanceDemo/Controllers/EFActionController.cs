@@ -363,26 +363,5 @@ namespace EFPerformanceDemo.Controllers
             });
         }
 
-        [HttpGet("get-orders-nplusone-read-sp")]
-        public async Task<IActionResult> GetOrdersNPlusOneReadSP([FromQuery] int categoryId)
-        {
-            var watch = Stopwatch.StartNew();
-
-            // Single set-based round-trip via Dapper + sp_GetOrdersByCategory,
-            // replacing the N+1 pattern in GetOrdersNPlusOneReadEF.
-            var response = await _orderSearchRepository.GetOrdersByCategorySpAsync(categoryId);
-
-            watch.Stop();
-
-            return Ok(new
-            {
-                Method = "Optimized Stored Procedure via Dapper (1 round-trip)",
-                TotalDatabaseQueriesExecuted = 1,
-                ResultCount = response.Count,
-                TimeTakenMs = watch.ElapsedMilliseconds,
-                TimeTakenSeconds = watch.Elapsed.TotalSeconds
-            });
-        }
-
     }
 }
