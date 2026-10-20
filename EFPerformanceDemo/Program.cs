@@ -1,6 +1,7 @@
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Repositories;
 using EFPerformanceDemo.Utility;
+using Microsoft.Extensions.DependencyInjection;
 using System.Data.Entity.Infrastructure.Interception;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -36,5 +37,22 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Seed demo data for ClientAccount/Holding/ModelPortfolio
+// Seed demo data for ClientAccount/Holding/ModelPortfolio. This will create the
+// LocalDB database (if it does not exist) and insert demo rows. Run at startup
+// so local dev environment has data available for the demo endpoints.
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // top-level await is supported; ensure seed completes before serving requests
+    await SeedData.SeedAsync(context);
+}
+//using (var scope = app.Services.CreateScope())
+//{
+//    var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+//    // top-level await is supported in this project; ensure seed completes before serving requests
+//    await SeedData.SeedAsync(context);
+//}
 
 app.Run();

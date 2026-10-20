@@ -21,6 +21,44 @@ namespace EFPerformanceDemo.Controllers
             _orderSearchRepository = orderSearchRepository;
         }
 
+        /// <summary>
+        /// Seed a large number of advisors and accounts for load testing.
+        /// Creates <paramref name="advisorCount"/> advisors each with <paramref name="accountsPerAdvisor"/> accounts.
+        /// </summary>
+        [HttpPost("seed-advisors-large")]
+        public async Task<IActionResult> SeedAdvisorsLarge([FromQuery] int advisorCount = 100, [FromQuery] int accountsPerAdvisor = 1000, [FromQuery] int holdingsPerAccount = 10, [FromQuery] int batchSize = 1000, [FromQuery] bool force = false)
+        {
+            // Validate inputs
+            advisorCount = Math.Max(1, advisorCount);
+            accountsPerAdvisor = Math.Max(1, accountsPerAdvisor);
+            holdingsPerAccount = Math.Max(1, holdingsPerAccount);
+            batchSize = Math.Max(100, batchSize);
+
+            await EFPerformanceDemo.Utility.SeedData.SeedLargeForAdvisorsAsync(_context, advisorCount, accountsPerAdvisor, holdingsPerAccount, batchSize, force);
+
+            return Ok(new { Message = "SeedLargeForAdvisors started/completed.", AdvisorCount = advisorCount, AccountsPerAdvisor = accountsPerAdvisor });
+        }
+
+        /// <summary>
+        /// Accepts a list of advisorFirmIds and invokes GetAccountDriftReportAsync for each.
+        /// Returns a summary with counts per advisor.
+        /// </summary>
+        [HttpPost("run-drift-reports")]
+        public async Task<IActionResult> RunDriftReports([FromBody] List<Guid> advisorFirmIds, [FromQuery] decimal driftThreshold = 0.05m)
+        {
+            if (advisorFirmIds == null || !advisorFirmIds.Any())
+                return BadRequest("Please provide one or more advisorFirmIds in the request body.");
+
+            var tasks = advisorFirmIds.Select(async id =>
+            {
+                var rows = await _orderSearchRepository.GetAccountDriftReportAsync(id, driftThreshold);
+                return new { AdvisorFirmId = id, Count = rows?.Count ?? 0 };
+            });
+
+            var results = await Task.WhenAll(tasks);
+            return Ok(results);
+        }
+
         [HttpPost("seed")]
         public async Task<IActionResult> SeedData()
         {

@@ -20,5 +20,10 @@ namespace EFPerformanceDemo.Repositories
         /// the original GetOrdersNPlusOneReadEF behavior exactly.
         /// </summary>
         Task<(List<OrderNPlusOneReadResult> Rows, int QueryCount)> GetOrdersNPlusOneAsync(int categoryId);
+
+        /// <summary>
+        /// Produces an account drift report for the given advisor firm id.
+        /// </summary>
+        Task<List<AccountDriftDto>> GetAccountDriftReportAsync(Guid advisorFirmId, decimal driftThreshold);
     }
 }

@@ -1,5 +1,9 @@
+using System;
 using System.Data;
 using System.Data.Entity;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using Dapper;
 using EFPerformanceDemo.DBContext;
 using EFPerformanceDemo.Models;
@@ -104,6 +108,33 @@ namespace EFPerformanceDemo.Repositories
             var queryCount = 1 + (orders.Count * 2); // 1 + 2000 + 2000 = 4,001 SQL queries!
 
             return (response, queryCount);
+        }
+
+        public async Task<List<AccountDriftDto>> GetAccountDriftReportAsync(Guid advisorFirmId, decimal driftThreshold)
+        {
+            // WARNING: This generates deep nested subqueries and page locks under concurrent usage
+            return await _context.ClientAccounts
+                .Where(a => a.AdvisorFirmId == advisorFirmId && a.IsActive)
+                .Select(a => new AccountDriftDto
+                {
+                    AccountNumber = a.AccountNumber,
+                    AccountName = a.AccountName,
+                    TotalPortfolioValue = a.Holdings.Sum(h => h.Quantity * h.CurrentPrice),
+                    CurrentCashWeight = a.Holdings.Where(h => h.AssetClass == "CASH")
+                                         .Sum(h => h.Quantity * h.CurrentPrice) / 
+                                         (a.Holdings.Sum(h => h.Quantity * h.CurrentPrice) == 0 ? 1 : a.Holdings.Sum(h => h.Quantity * h.CurrentPrice)),
+                    TargetCashWeight = a.ModelPortfolio.TargetCashAllocation,
+                    // Calculates absolute drift variance
+                    AbsoluteDrift = Math.Abs(
+                        (a.Holdings.Where(h => h.AssetClass == "CASH").Sum(h => h.Quantity * h.CurrentPrice) / 
+                         (a.Holdings.Sum(h => h.Quantity * h.CurrentPrice) == 0 ? 1 : a.Holdings.Sum(h => h.Quantity * h.CurrentPrice))) 
+                        - a.ModelPortfolio.TargetCashAllocation
+                    ),
+                    LastRebalanceDate = a.LastRebalanceTime
+                })
+                .Where(x => x.AbsoluteDrift >= driftThreshold)
+                .OrderByDescending(x => x.AbsoluteDrift)
+                .ToListAsync();
         }
 
     }
